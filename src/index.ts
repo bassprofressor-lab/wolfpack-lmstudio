@@ -10,8 +10,13 @@ import { toolsProvider } from "./toolsProvider.js";
 //   • tools provider       — recall / read_wolf_file / remember, for on-demand depth
 //
 // No cloud, no MCP: it reads the project's .wolf/ directory directly.
-export async function register(context: PluginContext): Promise<void> {
+//
+// LM Studio's plugin runner invokes the exported `main(context)`. `register` is kept as an alias
+// for older SDKs.
+export async function main(context: PluginContext): Promise<void> {
   context.withConfigSchematics(configSchematics);
   context.withPromptPreprocessor(preprocess);
   context.withToolsProvider(toolsProvider);
 }
+
+export const register = main;
