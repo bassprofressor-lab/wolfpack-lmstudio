@@ -62,7 +62,7 @@ no Hub account needed.
 
 ### From the LM Studio Hub (once published)
 
-Search **WolfPack** in LM Studio's plugin browser, or `lms get <owner>/wolfpack-lmstudio`.
+Search **WolfPack** in LM Studio's plugin browser, or `lms get krynexlabs/wolfpack-lmstudio`.
 
 ## Setup
 
@@ -89,9 +89,9 @@ npm install
 npm run build     # tsc typecheck
 lms dev           # load into LM Studio with hot reload
 lms login         # once, to link your Hub account
-lms push          # publish to the LM Studio Hub → lmstudio.ai/<your-handle>/wolfpack-lmstudio
+lms push          # publish to the LM Studio Hub → lmstudio.ai/krynexlabs/wolfpack-lmstudio
 ```
 
-Set `owner` in `manifest.json` to your LM Studio handle before publishing.
+Published by **krynexlabs** (`owner` in `manifest.json`).
 
 AGPL-3.0. Companion to [openwolf-enhanced](https://github.com/bassprofressor-lab/openwolf-enhanced).
