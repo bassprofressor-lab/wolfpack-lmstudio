@@ -1,0 +1,8 @@
+{
+  "name": "wolfpack-lmstudio",
+  "owner": "REPLACE_WITH_YOUR_LMSTUDIO_HANDLE",
+  "type": "plugin",
+  "runner": "typescript",
+  "description": "WolfPack for LM Studio: bring your project's .wolf/ knowledge base into every local-model chat — auto-injected resume digest + recall/remember tools. Local-only, no cloud, no MCP.",
+  "tags": ["memory", "context", "productivity", "coding"]
+}
