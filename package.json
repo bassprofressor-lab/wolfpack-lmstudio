@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "WolfPack for LM Studio — inject your .wolf/ knowledge base + recall/remember tools into any local-model chat.",
   "license": "AGPL-3.0-only",
-  "type": "module",
   "scripts": {
     "build": "tsc"
   },
