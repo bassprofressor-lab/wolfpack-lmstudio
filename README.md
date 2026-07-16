@@ -26,8 +26,17 @@ remember it.
   the machine. If it's unavailable, WolfPack silently falls back to pure-local, so the chat never
   breaks.
 
-Same `.wolf/` either way — it's one shared knowledge base, not a separate store. What Qwen
-`remember`s here shows up in your next Claude Code session, and vice versa.
+Same `.wolf/` either way — it's one shared knowledge base, not a separate store.
+
+## Write isolation (read union, write per-agent)
+
+A local model **reads** everything (canonical `.wolf/` + its own notes) but **writes only to its own
+area**: `.wolf/local/<agentId>/memory.md`. It never modifies `STATUS.md`, `cerebrum.md`, `memory.md`,
+or `buglog.json` — the authoritative knowledge base maintained by openwolf / Claude Code. Give each
+model a distinct `agentId` (default `qwen`) and their notes stay separate. A stronger model (or you)
+can then read `.wolf/local/*/` to see what each local model did, evaluate it, correct it, and promote
+what's worth keeping into the canonical files — without a local model ever overwriting them. Same
+"propose, never overwrite" rule the OpenWolf AI tasks follow.
 
 ## What it does NOT do (and why)
 

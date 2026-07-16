@@ -11,6 +11,18 @@ export function wolfDirFor(projectRoot: string): string {
   return path.join(projectRoot, ".wolf");
 }
 
+/**
+ * A local model's own write area: .wolf/local/<agentId>/. This is the ONLY place WolfPack writes.
+ * The canonical .wolf/ files (STATUS, cerebrum, memory, buglog) — the authoritative area maintained
+ * by openwolf / Claude Code — are never modified by a local model. Read is a union (everyone can
+ * read everything); write is isolated per agent, so what Qwen records can be read, reviewed, and
+ * promoted by a stronger model without ever being overwritten by it.
+ */
+export function localDir(wolfDir: string, agentId: string): string {
+  const safe = (agentId || "local").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40) || "local";
+  return path.join(wolfDir, "local", safe);
+}
+
 function readFileSafe(p: string): string {
   try { return fs.readFileSync(p, "utf-8"); } catch { return ""; }
 }
@@ -93,17 +105,20 @@ export interface Hit { file: string; line: number; text: string; score: number }
  * "ports"), ranked by term frequency with a rare-term bias — a compact stand-in for the full BM25
  * engine in openwolf-enhanced. Searches cerebrum, memory, STATUS as lines and buglog per entry.
  */
-export function recall(wolfDir: string, query: string, limit = 8): Hit[] {
+export function recall(wolfDir: string, query: string, limit = 8, agentId?: string): Hit[] {
   const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
   if (terms.length === 0) return [];
 
   const docs: Array<{ file: string; line: number; text: string; lower: string }> = [];
-  for (const name of ["cerebrum.md", "memory.md", "STATUS.md"]) {
-    const content = readFileSafe(path.join(wolfDir, name));
-    content.split(/\r?\n/).forEach((text, i) => {
-      if (text.trim().length > 0) docs.push({ file: name, line: i + 1, text: text.trim(), lower: text.toLowerCase() });
+  const addFile = (label: string, abspath: string) => {
+    readFileSafe(abspath).split(/\r?\n/).forEach((text, i) => {
+      if (text.trim().length > 0) docs.push({ file: label, line: i + 1, text: text.trim(), lower: text.toLowerCase() });
     });
-  }
+  };
+  // Canonical .wolf/ (read-only) …
+  for (const name of ["cerebrum.md", "memory.md", "STATUS.md"]) addFile(name, path.join(wolfDir, name));
+  // … plus this model's own area, so it can recall what it noted itself.
+  if (agentId) addFile(`local/${agentId}/memory.md`, path.join(localDir(wolfDir, agentId), "memory.md"));
   readBugs(wolfDir).forEach((b, i) => {
     const text = [b.id, b.error_message, b.root_cause, b.fix].filter(Boolean).join(" — ");
     if (text) docs.push({ file: "buglog.json", line: i + 1, text, lower: text.toLowerCase() });
@@ -134,17 +149,26 @@ export function recall(wolfDir: string, query: string, limit = 8): Hit[] {
   return hits.slice(0, limit);
 }
 
-/** Append a fact to memory.md under a plugin-written note line (never touches canonical structure). */
-export function remember(wolfDir: string, fact: string): string {
-  const p = path.join(wolfDir, "memory.md");
+/**
+ * Save a fact into THIS model's own area only (.wolf/local/<agentId>/memory.md). Canonical .wolf/
+ * files are never touched — a stronger model reviews and promotes from here; nothing here overwrites
+ * the authoritative knowledge base.
+ */
+export function remember(wolfDir: string, agentId: string, fact: string): string {
+  const dir = localDir(wolfDir, agentId);
+  const p = path.join(dir, "memory.md");
   const now = new Date();
-  const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  const line = `| ${hhmm} | (LM Studio note) ${fact.replace(/\|/g, "/").replace(/\n/g, " ")} | - | noted | ~0 |\n`;
+  const stamp = now.toISOString().slice(0, 16).replace("T", " ");
+  const line = `- [${stamp}] ${fact.replace(/\n/g, " ").trim()}\n`;
   try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(p)) {
+      fs.writeFileSync(p, `# Notes by \`${agentId}\` (local model)\n\n> Written via WolfPack LM Studio. This is ${agentId}'s own area — safe to review and promote; it never overwrites the canonical .wolf/ files.\n\n`, "utf-8");
+    }
     fs.appendFileSync(p, line, "utf-8");
-    return `Remembered → .wolf/memory.md`;
+    return `Remembered → .wolf/local/${agentId}/memory.md (your own area)`;
   } catch (e) {
-    return `Could not write memory.md: ${(e as Error).message}`;
+    return `Could not write note: ${(e as Error).message}`;
   }
 }
 

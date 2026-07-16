@@ -13,6 +13,15 @@ export const configSchematics = createConfigSchematics()
     "",
   )
   .field(
+    "agentId",
+    "string",
+    {
+      displayName: "Local model id (write namespace)",
+      subtitle: "This model's own area under .wolf/local/<id>/. All writes go here — the canonical .wolf/ files are never touched. Use a distinct id per model (e.g. 'qwen', 'llama').",
+    },
+    "qwen",
+  )
+  .field(
     "injectDigest",
     "boolean",
     {
