@@ -1,5 +1,7 @@
 # WolfPack LM Studio
 
+**LM Studio Hub:** https://lmstudio.ai/krynexlabs/wolfpack-lmstudio — install with `lms get krynexlabs/wolfpack-lmstudio` or search "WolfPack" in the plugin browser.
+
 Bring your project's **`.wolf/` knowledge base** into every LM Studio chat. Local-only — no cloud,
 no MCP. Built for people who run a local model (e.g. Qwen) in LM Studio and want it to remember the
 project the way [OpenWolf](https://github.com/bassprofressor-lab/openwolf-enhanced) makes Claude Code
