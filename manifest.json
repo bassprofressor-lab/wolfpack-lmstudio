@@ -2,7 +2,7 @@
   "name": "wolfpack-lmstudio",
   "owner": "krynexlabs",
   "type": "plugin",
-  "runner": "typescript",
+  "runner": "node",
   "description": "WolfPack for LM Studio: bring your project's .wolf/ knowledge base into every local-model chat — auto-injected resume digest + recall/remember tools. Local-only, no cloud, no MCP.",
   "tags": ["memory", "context", "productivity", "coding"]
 }
