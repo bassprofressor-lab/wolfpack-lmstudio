@@ -16,6 +16,19 @@ remember it.
   - `read_wolf_file(name)` — read STATUS/cerebrum/memory/buglog/anatomy in full (bounded)
   - `remember(fact)` — save a durable fact to `.wolf/memory.md`
 
+## Two modes
+
+- **Pure local (default).** Reads the `.wolf/` directory directly — digest + a built-in keyword
+  recall. No dependency, no network, no MCP. Everything stays on your machine.
+- **OpenWolf MCP sync (optional toggle).** Routes `recall` and the resume digest through the
+  OpenWolf MCP server (`openwolf mcp`), giving you the **real BM25 recall with citation ids, plus
+  Claude's native Auto Memory** — the same engine Claude Code uses. Requires the `openwolf` CLI on
+  the machine. If it's unavailable, WolfPack silently falls back to pure-local, so the chat never
+  breaks.
+
+Same `.wolf/` either way — it's one shared knowledge base, not a separate store. What Qwen
+`remember`s here shows up in your next Claude Code session, and vice versa.
+
 ## What it does NOT do (and why)
 
 OpenWolf's Claude Code integration passively watches file reads/edits and maintains anatomy, a token
@@ -57,6 +70,8 @@ Search **WolfPack** in LM Studio's plugin browser, or `lms get <owner>/wolfpack-
 | Project root | (empty → env `OPENWOLF_PROJECT_DIR` → working dir) | Which project's `.wolf/` to use |
 | Auto-inject resume digest | on | Prepend the digest to each message |
 | Max digest size (chars) | 1500 | Keep small for small local models |
+| Sync via OpenWolf MCP | off | On = recall + resume go through `openwolf mcp` (real BM25 + citations + native Auto Memory) |
+| openwolf command | `openwolf` | How to invoke the OpenWolf CLI for MCP sync (or an absolute path) |
 
 ## Develop & publish
 

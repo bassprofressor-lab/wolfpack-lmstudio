@@ -32,6 +32,24 @@ export const configSchematics = createConfigSchematics()
     },
     1500,
   )
+  .field(
+    "useOpenwolfMcp",
+    "boolean",
+    {
+      displayName: "Sync via OpenWolf MCP (optional)",
+      subtitle: "Off = pure local (reads .wolf/ directly). On = route recall + resume through the OpenWolf MCP server for real BM25 recall, citations, and native Auto Memory. Requires the openwolf CLI.",
+    },
+    false,
+  )
+  .field(
+    "openwolfCommand",
+    "string",
+    {
+      displayName: "openwolf command",
+      subtitle: "How to invoke the OpenWolf CLI for MCP sync (e.g. 'openwolf', or an absolute path to the bin). Only used when MCP sync is on.",
+    },
+    "openwolf",
+  )
   .build();
 
 /**

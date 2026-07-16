@@ -1,6 +1,7 @@
 import type { PromptPreprocessorController, ChatMessage } from "@lmstudio/sdk";
 import { configSchematics, resolveProjectRoot } from "./config.js";
 import { buildDigest, wolfDirFor, hasWolf } from "./wolf.js";
+import { openwolfMcpTool } from "./mcpClient.js";
 
 // Fires when the user hits Send. Prepends a compact OpenWolf resume digest (current quest,
 // Do-Not-Repeat, recently fixed bugs) so a local model continues with the project's hard-won
@@ -17,11 +18,15 @@ export async function preprocess(
     let projectRoot = "";
     let inject = true;
     let maxChars = 1500;
+    let useMcp = false;
+    let openwolfCmd = "openwolf";
     try {
       const cfg = ctl.getPluginConfig(configSchematics);
       projectRoot = cfg.get("projectRoot");
       inject = cfg.get("injectDigest");
       maxChars = cfg.get("maxDigestChars");
+      useMcp = cfg.get("useOpenwolfMcp");
+      openwolfCmd = cfg.get("openwolfCommand");
     } catch {
       // Config not wired yet — fall back to env / working dir below.
     }
@@ -30,9 +35,19 @@ export async function preprocess(
     try { workingDir = ctl.getWorkingDirectory?.(); } catch {}
     const root = resolveProjectRoot(projectRoot, workingDir);
 
-    if (!inject || !hasWolf(root)) return userText;
+    if (!inject) return userText;
 
-    const digest = buildDigest(wolfDirFor(root), maxChars);
+    // Optional sync: pull the real OpenWolf resume digest over MCP (staleness-aware, native memory).
+    let digest = "";
+    if (useMcp) {
+      const viaMcp = await openwolfMcpTool(openwolfCmd, root, "openwolf_resume", {});
+      if (viaMcp) digest = viaMcp.slice(0, maxChars);
+    }
+    // Pure-local default (also the fallback if MCP returned nothing).
+    if (!digest) {
+      if (!hasWolf(root)) return userText;
+      digest = buildDigest(wolfDirFor(root), maxChars);
+    }
     if (!digest) return userText;
 
     return [
