@@ -40,6 +40,22 @@ can then read `.wolf/local/*/` to see what each local model did, evaluate it, co
 what's worth keeping into the canonical files — without a local model ever overwriting them. Same
 "propose, never overwrite" rule the OpenWolf AI tasks follow.
 
+## Private notes stay private
+
+Anything wrapped in `<private>…</private>` in a `.wolf/` file is blanked before the plugin looks at
+it — it cannot reach the injected digest, `recall` results, or `read_wolf_file`. This is the same
+guarantee `OPENWOLF.md` gives, and the plugin reads the same files, so it keeps the same promise.
+
+Two details worth knowing:
+
+- An **unclosed** `<private>` tag hides everything from there to the end of the file. A forgotten
+  closing tag must not silently mean "not private".
+- An **inline** block hides only itself: `- deploy runs at 04:00 <private>token …</private>` stays
+  findable by "deploy" with the token removed.
+
+Filtering happens in the single function that reads knowledge files, so a future feature that reads
+one is covered without having to remember this.
+
 ## What it does NOT do (and why)
 
 OpenWolf's Claude Code integration passively watches file reads/edits and maintains anatomy, a token

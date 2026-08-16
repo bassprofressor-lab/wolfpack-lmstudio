@@ -23,8 +23,34 @@ export function localDir(wolfDir: string, agentId: string): string {
   return path.join(wolfDir, "local", safe);
 }
 
+/**
+ * Matches a <private> region. The second alternative is the fail-closed half: an opening tag with
+ * no matching </private> swallows everything to end of input. Without it a single forgotten closing
+ * tag silently hands the whole rest of the file to the model. An unclosed marker must never mean
+ * "not private". Ported from openwolf-enhanced (src/hooks/shared.ts) so both sides agree.
+ */
+const PRIVATE_RE = /<private>[\s\S]*?<\/private>|<private>[\s\S]*$/gi;
+
+/**
+ * Blank out <private>…</private>, keeping the line count intact.
+ *
+ * OPENWOLF.md promises that content wrapped this way stays out of the injected resume context and
+ * out of recall results. This plugin reads the same files, so it owes the same promise — it had not
+ * been keeping it: the digest, `recall` and `read_wolf_file` all passed private blocks straight to
+ * the model. Blanking (rather than deleting) keeps `recall`'s reported line numbers correct; a
+ * deletion would shift every citation after a private block.
+ */
+export function blankPrivate(text: string): string {
+  return text.replace(PRIVATE_RE, (m) => m.replace(/[^\n]/g, ""));
+}
+
+/**
+ * The single read path for every .wolf file. Private regions are removed HERE, at the choke point,
+ * so no caller can forget to do it — a new feature that reads a knowledge file is private-safe by
+ * construction.
+ */
 function readFileSafe(p: string): string {
-  try { return fs.readFileSync(p, "utf-8"); } catch { return ""; }
+  try { return blankPrivate(fs.readFileSync(p, "utf-8")); } catch { return ""; }
 }
 
 /** Extract one `## heading` section (heading line through the next `## ` or `---`). */
@@ -70,12 +96,17 @@ export function buildDigest(wolfDir: string, maxChars = 1500): string {
     if (entries.length > 0) add("## Do-Not-Repeat\n" + entries.slice(-6).join("\n"));
   }
 
-  // 3. Recently fixed bugs — so the model doesn't re-derive a known fix.
+  // 3. Recent bugs — so the model doesn't re-derive a known fix, and knows what is still broken.
+  //
+  // The heading used to say "already fixed" for whatever the last five entries were. A buglog also
+  // carries OPEN entries, so the digest was telling the model a live bug was dealt with — the one
+  // thing it must not believe. Status is read from the entry now instead of assumed.
   const bugs = readBugs(wolfDir).slice(-5);
   if (bugs.length > 0) {
-    add("## Known bugs already fixed\n" + bugs.map((b) => {
-      const line = `- ${b.error_message ?? "?"} → ${b.fix ?? "?"}`;
-      return line.length > 140 ? line.slice(0, 137) + "…" : line;
+    add("## Recent bugs from the project's buglog\n" + bugs.map((b) => {
+      const state = isOpenBug(b) ? "STILL OPEN" : "fixed";
+      const line = `- [${state}] ${b.error_message ?? "?"} → ${b.fix ?? "?"}`;
+      return line.length > 160 ? line.slice(0, 157) + "…" : line;
     }).join("\n"));
   }
 
@@ -88,7 +119,24 @@ function trimTo(text: string, n: number): string {
 
 interface Bug { error_message?: string; root_cause?: string; fix?: string; id?: string; tags?: unknown }
 
+/**
+ * Is this entry still open? Read from what the log actually carries: an "offen"/"open" tag, or a fix
+ * field that says so instead of describing a fix. Unknown counts as OPEN — telling the model a bug
+ * is fixed when it is not is the expensive direction of this guess.
+ */
+export function isOpenBug(b: Bug): boolean {
+  const tags = Array.isArray(b.tags) ? b.tags.map((t) => String(t).toLowerCase()) : [];
+  if (tags.includes("offen") || tags.includes("open")) return true;
+  if (tags.includes("gefixt") || tags.includes("fixed")) return false;
+  const fix = (b.fix ?? "").trim();
+  if (!fix) return true;
+  return /^\s*(offen|open|todo|tbd)\b/i.test(fix);
+}
+
 export function readBugs(wolfDir: string): Bug[] {
+  // readFileSafe blanks private regions first. A blanked region inside a JSON string still parses;
+  // one that spanned structure does not — and then this returns nothing rather than guessing, which
+  // is the right way round: no bug list is a small loss, a leaked one is not.
   const raw = readFileSafe(path.join(wolfDir, "buglog.json"));
   if (!raw) return [];
   let parsed: unknown;
@@ -143,7 +191,10 @@ export function recall(wolfDir: string, query: string, limit = 8, agentId?: stri
     // Reward lines that hit more of the query; mild length normalization.
     score *= 1 + matched / terms.length;
     score /= 1 + d.text.length / 400;
-    hits.push({ file: d.file, line: d.line, text: d.text, score: Math.round(score * 1000) / 1000 });
+    // Cap each hit. STATUS.md lines run to ~700 characters here, and eight of them put ~1.000 tokens
+    // into a small model's window for a single search. The hit is a pointer — read_wolf_file is the
+    // way to see the whole thing.
+    hits.push({ file: d.file, line: d.line, text: trimTo(d.text, 240), score: Math.round(score * 1000) / 1000 });
   }
   hits.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line);
   return hits.slice(0, limit);
@@ -177,8 +228,31 @@ const READABLE = new Set(["STATUS.md", "cerebrum.md", "memory.md", "buglog.json"
 /** Read one whitelisted .wolf/ file, bounded so a huge file can't blow the context. */
 export function readWolfFile(wolfDir: string, name: string, maxChars = 8000): string {
   if (!READABLE.has(name)) return `Not a readable .wolf file. Allowed: ${[...READABLE].join(", ")}`;
+
+  // buglog.json is the one file where a character-count cut is actively harmful: at 220k it gets
+  // sliced mid-string and the model receives ~2k tokens of unparseable JSON fragment. Rendered as
+  // entries instead — the newest ones, which is what anyone asking for the buglog wants.
+  if (name === "buglog.json") {
+    const bugs = readBugs(wolfDir);
+    if (bugs.length === 0) return "buglog.json is empty, missing, or unreadable.";
+    const lines: string[] = [];
+    let used = 0;
+    for (const b of bugs.slice().reverse()) {
+      const entry = [
+        `## ${b.id ?? "?"} [${isOpenBug(b) ? "STILL OPEN" : "fixed"}]`,
+        `symptom: ${trimTo((b.error_message ?? "?").replace(/\s+/g, " "), 300)}`,
+        `cause:   ${trimTo((b.root_cause ?? "?").replace(/\s+/g, " "), 300)}`,
+        `fix:     ${trimTo((b.fix ?? "?").replace(/\s+/g, " "), 300)}`,
+      ].join("\n");
+      if (used + entry.length + 2 > maxChars) break;
+      lines.push(entry);
+      used += entry.length + 2;
+    }
+    return `${bugs.length} entries in buglog.json, newest ${lines.length} shown:\n\n` + lines.join("\n\n");
+  }
+
   const content = readFileSafe(path.join(wolfDir, name));
-  if (!content) return `${name} is empty or missing.`;
+  if (!content.trim()) return `${name} is empty or missing.`;
   return content.length > maxChars ? content.slice(0, maxChars) + `\n…(truncated, ${content.length} chars total)` : content;
 }
 

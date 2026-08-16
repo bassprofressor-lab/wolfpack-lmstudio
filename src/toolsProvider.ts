@@ -1,7 +1,7 @@
 import { tool, type Tool, type ToolsProviderController } from "@lmstudio/sdk";
 import { z } from "zod";
 import { configSchematics, resolveProjectRoot } from "./config.js";
-import { wolfDirFor, recall, remember, readWolfFile } from "./wolf.js";
+import { wolfDirFor, recall, remember, readWolfFile, hasWolf } from "./wolf.js";
 import { openwolfMcpTool } from "./mcpClient.js";
 
 // Tools the local model can call during a chat to work against the project's .wolf/ knowledge base:
@@ -63,6 +63,13 @@ export async function toolsProvider(ctl: ToolsProviderController): Promise<Tool[
     parameters: { fact: z.string().describe("The fact to remember, one concise sentence.") },
     implementation: async ({ fact }) => {
       const { root: r, agentId, rootConfigured } = cfg();
+      // Without a configured root, `r` is whatever cwd the plugin runtime happens to have — LM
+      // Studio's own directory or an ephemeral per-chat one. Writing there used to create a stray
+      // .wolf/local/<agent>/ that nobody would ever look at, and the note was lost with the chat.
+      // Refuse and say why, unless the directory really is a project knowledge base.
+      if (!rootConfigured && !hasWolf(r)) {
+        return `Not saved: no project is configured, so there is nowhere durable to put this.${persistHint}`;
+      }
       const res = remember(wolfDirFor(r), agentId, fact); // auto-creates .wolf/local/<agent>/
       return rootConfigured ? res : res + persistHint;
     },

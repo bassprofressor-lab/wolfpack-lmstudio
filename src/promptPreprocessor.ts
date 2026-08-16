@@ -3,6 +3,9 @@ import { configSchematics, resolveProjectRoot } from "./config.js";
 import { buildDigest, wolfDirFor, hasWolf } from "./wolf.js";
 import { openwolfMcpTool } from "./mcpClient.js";
 
+/** Marker that identifies an already-injected digest in the chat history. */
+export const CONTEXT_TAG = "<wolfpack-context>";
+
 // Fires when the user hits Send. Prepends a compact OpenWolf resume digest (current quest,
 // Do-Not-Repeat, recently fixed bugs) so a local model continues with the project's hard-won
 // context — the LM Studio analogue of OpenWolf's SessionStart additionalContext injection.
@@ -37,6 +40,16 @@ export async function preprocess(
 
     if (!inject) return userText;
 
+    // Inject once per chat, not once per message. The digest is ~1.500 characters; a twenty-turn
+    // chat used to carry twenty copies of it, which on an 8k local model is most of the window spent
+    // repeating what the model already read. If the marker is anywhere in the history, this chat has
+    // it. pullHistory is best-effort: if it is unavailable or throws, fall back to injecting, since
+    // a duplicated digest is a smaller problem than a missing one.
+    try {
+      const history = await ctl.pullHistory?.();
+      if (history && history.toString().includes(CONTEXT_TAG)) return userText;
+    } catch { /* fall through and inject */ }
+
     // Optional sync: pull the real OpenWolf resume digest over MCP (staleness-aware, native memory).
     let digest = "";
     if (useMcp) {
@@ -51,7 +64,7 @@ export async function preprocess(
     if (!digest) return userText;
 
     return [
-      "<wolfpack-context>",
+      CONTEXT_TAG,
       "Project knowledge (from .wolf/). Use it; call the `recall` tool to search deeper before re-deriving anything.",
       "",
       digest,

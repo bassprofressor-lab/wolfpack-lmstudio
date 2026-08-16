@@ -53,7 +53,11 @@ export async function openwolfMcpTool(
         let msg: { id?: number; result?: { content?: Array<{ text?: string }>; isError?: boolean } };
         try { msg = JSON.parse(line); } catch { continue; }
         if (msg.id === 1) {
-          // initialize acknowledged → issue the tool call
+          // initialize acknowledged → confirm the handshake, THEN issue the tool call. MCP requires
+          // the initialized notification before any request; OpenWolf's own server tolerates its
+          // absence, but a spec-strict server rejects the tool call and the user sees "MCP sync does
+          // nothing" with no error to go on.
+          send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
           send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: toolName, arguments: args } });
         } else if (msg.id === 2) {
           const text = msg.result?.content?.map((c) => c.text ?? "").join("\n") ?? null;
