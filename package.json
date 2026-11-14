@@ -1,6 +1,6 @@
 {
   "name": "wolfpack-lmstudio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "WolfPack for LM Studio — inject your .wolf/ knowledge base + recall/remember tools into any local-model chat.",
   "license": "AGPL-3.0-only",
   "scripts": {
@@ -8,11 +8,11 @@
     "test": "npm run build && node --test test/*.test.js"
   },
   "dependencies": {
-    "@lmstudio/sdk": "^1.0.0",
+    "@lmstudio/sdk": "^2.1.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }

@@ -1,5 +1,5 @@
 import type { PluginContext } from "@lmstudio/sdk";
-import { configSchematics } from "./config.js";
+import { configSchematics, globalConfigSchematics } from "./config.js";
 import { preprocess } from "./promptPreprocessor.js";
 import { toolsProvider } from "./toolsProvider.js";
 
@@ -14,6 +14,7 @@ import { toolsProvider } from "./toolsProvider.js";
 // LM Studio's plugin runner invokes the exported `main(context)`. `register` is kept as an alias
 // for older SDKs.
 export async function main(context: PluginContext): Promise<void> {
+  context.withGlobalConfigSchematics(globalConfigSchematics);
   context.withConfigSchematics(configSchematics);
   context.withPromptPreprocessor(preprocess);
   context.withToolsProvider(toolsProvider);

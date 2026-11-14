@@ -46,15 +46,24 @@ Anything wrapped in `<private>…</private>` in a `.wolf/` file is blanked befor
 it — it cannot reach the injected digest, `recall` results, or `read_wolf_file`. This is the same
 guarantee `OPENWOLF.md` gives, and the plugin reads the same files, so it keeps the same promise.
 
-Two details worth knowing:
+The rules:
 
-- An **unclosed** `<private>` tag hides everything from there to the end of the file. A forgotten
-  closing tag must not silently mean "not private".
+- A **closed** block is hidden wherever it is, also inside code.
+- An **unclosed** `<private>` at the start of a line (also after a list marker or `>`) hides
+  everything from there to the end of the file. A forgotten closing tag must not silently mean
+  "not private".
 - An **inline** block hides only itself: `- deploy runs at 04:00 <private>token …</private>` stays
-  findable by "deploy" with the token removed.
+  findable by "deploy" with the token removed. An unclosed tag in the middle of a line hides the
+  rest of that line.
+- A **mention** of the syntax in inline code or a closed code fence (`` `<private>` ``) is text,
+  not a block, and hides nothing. Before 0.3.0 such a mention hid the rest of the file, which in
+  a real knowledge base removed most of `cerebrum.md` and every bug.
+- In `buglog.json` every string value is filtered on its own, so the JSON stays readable.
+- Notes written with `remember` cannot open a private block: tags in them are neutralised, and a
+  note is one line of at most 1000 characters.
 
-Filtering happens in the single function that reads knowledge files, so a future feature that reads
-one is covered without having to remember this.
+Filtering happens in the two functions that read knowledge files (one for text, one for JSON), so a
+future feature that reads one is covered without having to remember this.
 
 ## What it does NOT do (and why)
 
@@ -84,21 +93,34 @@ Search **WolfPack** in LM Studio's plugin browser, or `lms get krynexlabs/wolfpa
 
 ## Setup
 
-1. Open the plugin's config in LM Studio and set **Project root** to the absolute path of a project
-   that has a `.wolf/` directory (created by
-   [openwolf-enhanced](https://www.npmjs.com/package/openwolf-enhanced)).
-2. Chat with your local model — the digest is injected automatically, and the model can call
-   `recall` / `remember`.
+1. Open the plugin's **global** settings in LM Studio and set **Project root** to the absolute path
+   of a project that has a `.wolf/` directory (created by
+   [openwolf-enhanced](https://www.npmjs.com/package/openwolf-enhanced)). It applies to every chat.
+2. Chat with your local model — the digest is injected into the first message of each chat, and the
+   model can call `recall` / `remember`.
 
 ## Config
+
+Global settings (set once, valid in every chat):
 
 | Setting | Default | Meaning |
 |---|---|---|
 | Project root | (empty → env `OPENWOLF_PROJECT_DIR` → working dir) | Which project's `.wolf/` to use |
-| Auto-inject resume digest | on | Prepend the digest to each message |
-| Max digest size (chars) | 1500 | Keep small for small local models |
+| Local model id | `qwen` | Write namespace under `.wolf/local/<id>/`; an id made only of dots falls back to `local` |
 | Sync via OpenWolf MCP | off | On = recall + resume go through `openwolf mcp` (real BM25 + citations + native Auto Memory) |
 | openwolf command | `openwolf` | How to invoke the OpenWolf CLI for MCP sync (or an absolute path) |
+
+Per chat:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| Project root for this chat | empty = global value | Use a different project in this one chat |
+| Auto-inject resume digest | on | Prepend the digest to the first message |
+| Max digest size (chars) | 1500 | Keep small for small local models; quest, Do-Not-Repeat and bugs share it |
+
+> **Upgrading from 0.2.0:** project root, model id and the MCP settings moved from the per-chat
+> settings to the global ones. Set them once in the plugin settings; old per-chat values are not
+> read any more.
 
 ## Develop & publish
 

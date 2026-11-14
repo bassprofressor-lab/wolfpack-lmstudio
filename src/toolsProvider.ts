@@ -1,6 +1,6 @@
 import { tool, type Tool, type ToolsProviderController } from "@lmstudio/sdk";
 import { z } from "zod";
-import { configSchematics, resolveProjectRoot } from "./config.js";
+import { readSettings, resolveProjectRoot } from "./config.js";
 import { wolfDirFor, recall, remember, readWolfFile, hasWolf } from "./wolf.js";
 import { openwolfMcpTool } from "./mcpClient.js";
 
@@ -9,14 +9,7 @@ import { openwolfMcpTool } from "./mcpClient.js";
 // depth that complements the always-on digest injected by the prompt preprocessor.
 export async function toolsProvider(ctl: ToolsProviderController): Promise<Tool[]> {
   function cfg(): { root: string; useMcp: boolean; openwolfCmd: string; agentId: string; rootConfigured: boolean } {
-    let projectRoot = "", useMcp = false, openwolfCmd = "openwolf", agentId = "qwen";
-    try {
-      const c = ctl.getPluginConfig(configSchematics);
-      projectRoot = c.get("projectRoot");
-      useMcp = c.get("useOpenwolfMcp");
-      openwolfCmd = c.get("openwolfCommand");
-      agentId = c.get("agentId") || "qwen";
-    } catch {}
+    const { projectRoot, useMcp, openwolfCmd, agentId } = readSettings(ctl);
     let workingDir: string | undefined;
     try { workingDir = ctl.getWorkingDirectory?.(); } catch {}
     const rootConfigured = !!(projectRoot && projectRoot.trim());

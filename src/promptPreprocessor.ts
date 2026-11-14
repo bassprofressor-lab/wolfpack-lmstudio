@@ -1,5 +1,5 @@
 import type { PromptPreprocessorController, ChatMessage } from "@lmstudio/sdk";
-import { configSchematics, resolveProjectRoot } from "./config.js";
+import { readSettings, resolveProjectRoot } from "./config.js";
 import { buildDigest, wolfDirFor, hasWolf } from "./wolf.js";
 import { openwolfMcpTool } from "./mcpClient.js";
 
@@ -18,21 +18,7 @@ export async function preprocess(
 ): Promise<string | ChatMessage> {
   const userText = userMessage.getText();
   try {
-    let projectRoot = "";
-    let inject = true;
-    let maxChars = 1500;
-    let useMcp = false;
-    let openwolfCmd = "openwolf";
-    try {
-      const cfg = ctl.getPluginConfig(configSchematics);
-      projectRoot = cfg.get("projectRoot");
-      inject = cfg.get("injectDigest");
-      maxChars = cfg.get("maxDigestChars");
-      useMcp = cfg.get("useOpenwolfMcp");
-      openwolfCmd = cfg.get("openwolfCommand");
-    } catch {
-      // Config not wired yet — fall back to env / working dir below.
-    }
+    const { projectRoot, injectDigest: inject, maxDigestChars: maxChars, useMcp, openwolfCmd } = readSettings(ctl);
 
     let workingDir: string | undefined;
     try { workingDir = ctl.getWorkingDirectory?.(); } catch {}

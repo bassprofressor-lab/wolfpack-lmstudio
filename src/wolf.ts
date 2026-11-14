@@ -19,38 +19,167 @@ export function wolfDirFor(projectRoot: string): string {
  * promoted by a stronger model without ever being overwritten by it.
  */
 export function localDir(wolfDir: string, agentId: string): string {
-  const safe = (agentId || "local").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40) || "local";
-  return path.join(wolfDir, "local", safe);
+  return path.join(wolfDir, "local", safeAgentId(agentId));
 }
 
 /**
- * Matches a <private> region. The second alternative is the fail-closed half: an opening tag with
- * no matching </private> swallows everything to end of input. Without it a single forgotten closing
- * tag silently hands the whole rest of the file to the model. An unclosed marker must never mean
- * "not private". Ported from openwolf-enhanced (src/hooks/shared.ts) so both sides agree.
+ * The agent id as it is used on disk: letters, digits, `.`, `_`, `-`, at most 40 characters. An id
+ * made only of dots ("." or "..") is a path step, not a name — ".." put the "own area" at .wolf/
+ * itself and `remember` wrote into the canonical memory.md — so it falls back to "local".
  */
-const PRIVATE_RE = /<private>[\s\S]*?<\/private>|<private>[\s\S]*$/gi;
+export function safeAgentId(agentId: string): string {
+  const safe = (agentId || "").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40);
+  return !safe || /^\.+$/.test(safe) ? "local" : safe;
+}
+
+const OPEN = "<private>";
+const CLOSE = "</private>";
+
+/**
+ * Which characters sit inside Markdown code: a fenced block (``` or ~~~, only when it is closed) or
+ * an inline code span (a backtick run closed by a run of the same length on the same line).
+ * Returns one id per character, -1 for "not code". Unclosed fences and spans do not count as code:
+ * treating them as code would turn a real private tag after them into a literal, which is the leak
+ * direction.
+ */
+function codeSegments(text: string): Int32Array {
+  const seg = new Int32Array(text.length).fill(-1);
+  let id = 0;
+  const lines: Array<{ start: number; end: number }> = [];
+  for (let i = 0, start = 0; i <= text.length; i++) {
+    if (i === text.length || text[i] === "\n") { lines.push({ start, end: i }); start = i + 1; }
+  }
+  const isFence = (l: { start: number; end: number }) => /^\s{0,3}(```|~~~)/.test(text.slice(l.start, l.end));
+  const inFence = new Array(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i++) {
+    if (!isFence(lines[i])) continue;
+    const marker = text.slice(lines[i].start, lines[i].end).trim().slice(0, 3);
+    let j = i + 1;
+    while (j < lines.length && !(isFence(lines[j]) && text.slice(lines[j].start, lines[j].end).trim().startsWith(marker))) j++;
+    if (j >= lines.length) continue; // unclosed fence: not code
+    const fid = id++;
+    for (let k = i; k <= j; k++) { inFence[k] = true; seg.fill(fid, lines[k].start, lines[k].end); }
+    i = j;
+  }
+  for (let li = 0; li < lines.length; li++) {
+    if (inFence[li]) continue;
+    const { start, end } = lines[li];
+    let i = start;
+    while (i < end) {
+      if (text[i] !== "`") { i++; continue; }
+      let n = 0;
+      while (i + n < end && text[i + n] === "`") n++;
+      // find a closing run of exactly n backticks on the same line
+      let j = i + n, close = -1;
+      while (j < end) {
+        if (text[j] !== "`") { j++; continue; }
+        let m = 0;
+        while (j + m < end && text[j + m] === "`") m++;
+        if (m === n) { close = j; break; }
+        j += m;
+      }
+      if (close === -1) { i += n; continue; } // unclosed span: not code
+      seg.fill(id++, i, close + n);
+      i = close + n;
+    }
+  }
+  return seg;
+}
+
+/** Index of the next closing tag at or after `from`, below `limit`, in the given code segment. */
+function findClose(lower: string, seg: Int32Array, from: number, limit: number, segId: number): number {
+  let q = lower.indexOf(CLOSE, from);
+  while (q !== -1 && q < limit) {
+    if (seg[q] === segId) return q;
+    q = lower.indexOf(CLOSE, q + 1);
+  }
+  return -1;
+}
 
 /**
  * Blank out <private>…</private>, keeping the line count intact.
  *
  * OPENWOLF.md promises that content wrapped this way stays out of the injected resume context and
- * out of recall results. This plugin reads the same files, so it owes the same promise — it had not
- * been keeping it: the digest, `recall` and `read_wolf_file` all passed private blocks straight to
- * the model. Blanking (rather than deleting) keeps `recall`'s reported line numbers correct; a
- * deletion would shift every citation after a private block.
+ * out of recall results. Blanking (rather than deleting) keeps `recall`'s line numbers correct.
+ *
+ * The rules, in order of how they protect:
+ *   • A closed pair is blanked wherever it is, also inside code. Pairing never crosses the border
+ *     between code and prose, so a literal mention in backticks cannot swallow the text up to the
+ *     next real block.
+ *   • An unclosed tag at the start of a line (optionally after a list marker or `>`) is a block
+ *     opener with a forgotten end: it hides everything to the end of the file. A forgotten closing
+ *     tag must never mean "not private".
+ *   • An unclosed tag in the middle of a line hides the rest of that line. Inline blocks are
+ *     written on one line, so the line is the scope a writer meant.
+ *   • An unclosed tag inside inline code or a closed fenced block is a mention of the syntax, not
+ *     a block, and is left alone. The previous rule hid everything after such a mention: in a real
+ *     knowledge base twelve of them, all documentation, hid 82 % of cerebrum.md and broke the
+ *     buglog JSON, so the digest lost Do-Not-Repeat and every bug.
  */
 export function blankPrivate(text: string): string {
-  return text.replace(PRIVATE_RE, (m) => m.replace(/[^\n]/g, ""));
+  const lower = text.toLowerCase();
+  if (!lower.includes(OPEN)) return text;
+  const seg = codeSegments(text);
+  const regions: Array<[number, number]> = [];
+  let p = lower.indexOf(OPEN);
+  while (p !== -1) {
+    const s = seg[p];
+    const lineEnd = (() => { const e = text.indexOf("\n", p); return e === -1 ? text.length : e; })();
+    let end: number;
+    if (s >= 0) {
+      // inside code: only a pair within the same code segment counts
+      let segEnd = p; while (segEnd < text.length && seg[segEnd] === s) segEnd++;
+      const q = findClose(lower, seg, p + OPEN.length, segEnd, s);
+      if (q === -1) { p = lower.indexOf(OPEN, p + OPEN.length); continue; }
+      end = q + CLOSE.length;
+    } else {
+      const lineStart = text.lastIndexOf("\n", p - 1) + 1;
+      const atBlockStart = /^\s*(?:[-*+>]\s*|\d+[.)]\s*)?$/.test(text.slice(lineStart, p));
+      const q = findClose(lower, seg, p + OPEN.length, atBlockStart ? text.length : lineEnd, -1);
+      end = q !== -1 ? q + CLOSE.length : atBlockStart ? text.length : lineEnd;
+    }
+    regions.push([p, end]);
+    p = lower.indexOf(OPEN, end);
+  }
+  let out = "", last = 0;
+  for (const [a, b] of regions) {
+    out += text.slice(last, a) + text.slice(a, b).replace(/[^\n]/g, "");
+    last = b;
+  }
+  return out + text.slice(last);
+}
+
+/** Apply blankPrivate to every string inside a parsed JSON value. */
+function blankPrivateDeep(v: unknown): unknown {
+  if (typeof v === "string") return blankPrivate(v);
+  if (Array.isArray(v)) return v.map(blankPrivateDeep);
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) o[k] = blankPrivateDeep(val);
+    return o;
+  }
+  return v;
 }
 
 /**
- * The single read path for every .wolf file. Private regions are removed HERE, at the choke point,
- * so no caller can forget to do it — a new feature that reads a knowledge file is private-safe by
- * construction.
+ * The single read path for every .wolf text file. Private regions are removed HERE, at the choke
+ * point, so no caller can forget to do it — a new feature that reads a knowledge file is
+ * private-safe by construction.
  */
 function readFileSafe(p: string): string {
   try { return blankPrivate(fs.readFileSync(p, "utf-8")); } catch { return ""; }
+}
+
+/**
+ * The read path for JSON knowledge files. Parse first, then blank each string value: a mention of
+ * the tag inside one bug entry then costs the rest of that one field, not the rest of the file
+ * (which used to break the JSON and drop every bug). A file that is not valid JSON as written is
+ * returned as null rather than guessed at.
+ */
+function readJsonSafe(p: string): unknown {
+  let raw: string;
+  try { raw = fs.readFileSync(p, "utf-8"); } catch { return null; }
+  try { return blankPrivateDeep(JSON.parse(raw)); } catch { return null; }
 }
 
 /** Extract one `## heading` section (heading line through the next `## ` or `---`). */
@@ -74,26 +203,42 @@ function extractSection(markdown: string, headingPattern: RegExp): string {
 export function buildDigest(wolfDir: string, maxChars = 1500): string {
   const parts: string[] = [];
   let used = 0;
+  const room = (): number => maxChars - used - 2;
   const add = (text: string): void => {
-    if (!text) return;
-    if (used + text.length + 2 > maxChars) return;
+    if (!text || text.length > room()) return;
     parts.push(text);
     used += text.length + 2;
   };
+  // A list section takes as many of its NEWEST entries as still fit. It used to be all or nothing,
+  // and with the default budget the quest left too little room for the whole Do-Not-Repeat block,
+  // so the digest never carried it.
+  const addList = (heading: string, entries: string[], cap = Infinity): void => {
+    const limit = Math.min(room(), cap);
+    const picked: string[] = [];
+    let len = heading.length;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (len + 1 + entries[i].length > limit) break;
+      picked.unshift(entries[i]);
+      len += 1 + entries[i].length;
+    }
+    if (picked.length > 0) add(heading + "\n" + picked.join("\n"));
+  };
 
-  // 1. Current quest / next steps — the single most valuable resume context.
+  // 1. Current quest / next steps — the single most valuable resume context, but capped at under
+  //    half the budget so the lessons and bugs below still get room.
   const status = readFileSafe(path.join(wolfDir, "STATUS.md"));
   if (status) {
     const quest = extractSection(status, /^## (🚀|Next|🧭)/) || extractSection(status, /^## /);
-    if (quest) add(trimTo(quest, 700));
+    if (quest) add(trimTo(quest, Math.min(700, Math.floor(maxChars * 0.45))));
   }
 
-  // 2. Do-Not-Repeat — the last few hard-won lessons.
+  // 2. Do-Not-Repeat — the last few hard-won lessons, each bounded.
   const cerebrum = readFileSafe(path.join(wolfDir, "cerebrum.md"));
   if (cerebrum) {
     const dnr = extractSection(cerebrum, /^## Do-Not-Repeat/);
-    const entries = dnr.split("\n").filter((l) => l.trim().startsWith("- "));
-    if (entries.length > 0) add("## Do-Not-Repeat\n" + entries.slice(-6).join("\n"));
+    const entries = dnr.split("\n").filter((l) => l.trim().startsWith("- ")).slice(-6).map((l) => trimTo(l.trim(), 240));
+    // Leave the bugs below their share: at most 60 % of what the quest left over.
+    addList("## Do-Not-Repeat", entries, Math.floor(room() * 0.6));
   }
 
   // 3. Recent bugs — so the model doesn't re-derive a known fix, and knows what is still broken.
@@ -102,13 +247,11 @@ export function buildDigest(wolfDir: string, maxChars = 1500): string {
   // carries OPEN entries, so the digest was telling the model a live bug was dealt with — the one
   // thing it must not believe. Status is read from the entry now instead of assumed.
   const bugs = readBugs(wolfDir).slice(-5);
-  if (bugs.length > 0) {
-    add("## Recent bugs from the project's buglog\n" + bugs.map((b) => {
-      const state = isOpenBug(b) ? "STILL OPEN" : "fixed";
-      const line = `- [${state}] ${b.error_message ?? "?"} → ${b.fix ?? "?"}`;
-      return line.length > 160 ? line.slice(0, 157) + "…" : line;
-    }).join("\n"));
-  }
+  addList("## Recent bugs from the project's buglog", bugs.map((b) => {
+    const state = isOpenBug(b) ? "STILL OPEN" : "fixed";
+    const line = `- [${state}] ${b.error_message ?? "?"} → ${b.fix ?? "?"}`;
+    return line.length > 160 ? line.slice(0, 157) + "…" : line;
+  }));
 
   return parts.join("\n\n");
 }
@@ -134,13 +277,8 @@ export function isOpenBug(b: Bug): boolean {
 }
 
 export function readBugs(wolfDir: string): Bug[] {
-  // readFileSafe blanks private regions first. A blanked region inside a JSON string still parses;
-  // one that spanned structure does not — and then this returns nothing rather than guessing, which
-  // is the right way round: no bug list is a small loss, a leaked one is not.
-  const raw = readFileSafe(path.join(wolfDir, "buglog.json"));
-  if (!raw) return [];
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return []; }
+  // readJsonSafe blanks private regions per string value, after parsing.
+  const parsed = readJsonSafe(path.join(wolfDir, "buglog.json"));
   if (!parsed || typeof parsed !== "object") return [];
   const arr = Array.isArray(parsed) ? parsed : (parsed as { bugs?: unknown[] }).bugs;
   return Array.isArray(arr) ? (arr as Bug[]) : [];
@@ -166,7 +304,7 @@ export function recall(wolfDir: string, query: string, limit = 8, agentId?: stri
   // Canonical .wolf/ (read-only) …
   for (const name of ["cerebrum.md", "memory.md", "STATUS.md"]) addFile(name, path.join(wolfDir, name));
   // … plus this model's own area, so it can recall what it noted itself.
-  if (agentId) addFile(`local/${agentId}/memory.md`, path.join(localDir(wolfDir, agentId), "memory.md"));
+  if (agentId) addFile(`local/${safeAgentId(agentId)}/memory.md`, path.join(localDir(wolfDir, agentId), "memory.md"));
   readBugs(wolfDir).forEach((b, i) => {
     const text = [b.id, b.error_message, b.root_cause, b.fix].filter(Boolean).join(" — ");
     if (text) docs.push({ file: "buglog.json", line: i + 1, text, lower: text.toLowerCase() });
@@ -205,19 +343,28 @@ export function recall(wolfDir: string, query: string, limit = 8, agentId?: stri
  * files are never touched — a stronger model reviews and promotes from here; nothing here overwrites
  * the authoritative knowledge base.
  */
+/** Longest note `remember` accepts. One fact is a sentence or two, not a document. */
+export const MAX_FACT_CHARS = 1000;
+
 export function remember(wolfDir: string, agentId: string, fact: string): string {
-  const dir = localDir(wolfDir, agentId);
+  const id = safeAgentId(agentId);
+  const dir = localDir(wolfDir, id);
   const p = path.join(dir, "memory.md");
-  const now = new Date();
-  const stamp = now.toISOString().slice(0, 16).replace("T", " ");
-  const line = `- [${stamp}] ${fact.replace(/\n/g, " ").trim()}\n`;
+  // The model writes this text, possibly steered by a document it just read. A private tag in it
+  // would open a block in the agent's own notes and hide every later note (unclosed at line start
+  // means "to end of file"), so tags are neutralised. One line, bounded length.
+  let text = fact.replace(/<(\/?)private>/gi, "[$1private]").replace(/\s*[\r\n]+\s*/g, " ").trim();
+  if (!text) return "Not saved: the fact was empty.";
+  if (text.length > MAX_FACT_CHARS) text = text.slice(0, MAX_FACT_CHARS - 1) + "…";
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const line = `- [${stamp}] ${text}\n`;
   try {
     fs.mkdirSync(dir, { recursive: true });
     if (!fs.existsSync(p)) {
-      fs.writeFileSync(p, `# Notes by \`${agentId}\` (local model)\n\n> Written via WolfPack LM Studio. This is ${agentId}'s own area — safe to review and promote; it never overwrites the canonical .wolf/ files.\n\n`, "utf-8");
+      fs.writeFileSync(p, `# Notes by \`${id}\` (local model)\n\n> Written via WolfPack LM Studio. This is ${id}'s own area — safe to review and promote; it never overwrites the canonical .wolf/ files.\n\n`, "utf-8");
     }
     fs.appendFileSync(p, line, "utf-8");
-    return `Remembered → .wolf/local/${agentId}/memory.md (your own area)`;
+    return `Remembered → .wolf/local/${id}/memory.md (your own area)`;
   } catch (e) {
     return `Could not write note: ${(e as Error).message}`;
   }
