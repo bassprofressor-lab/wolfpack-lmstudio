@@ -167,7 +167,7 @@ test("a chat can override the global project root", () => {
 
 test("settings fall back to defaults when the runtime gives no config", () => {
   const s = readSettings(fakeCtl(undefined, undefined));
-  assert.deepEqual(s, { projectRoot: "", agentId: "qwen", useMcp: false, openwolfCmd: "openwolf", injectDigest: true, maxDigestChars: 1500 });
+  assert.deepEqual(s, { projectRoot: "", agentId: "qwen", useMcp: false, openwolfCmd: "openwolf", injectDigest: true, maxDigestChars: 1500, maxReadChars: 3000 });
 });
 
 test("with the default budget the digest still carries lessons and bugs next to a long quest", () => {
@@ -181,4 +181,19 @@ test("with the default budget the digest still carries lessons and bugs next to 
   assert.match(d, /## Do-Not-Repeat\n[\s\S]*- lesson 9:/, "newest lesson must be there");
   assert.match(d, /STILL OPEN\] kafka lag/);
   cleanup();
+});
+
+// ── Live test 14.11.: three 8k reads overflowed qwen3.8's 8k window and it invented file names ──
+
+test("read_wolf_file returns at most 3000 characters by default and points to recall", () => {
+  const { wolf, cleanup } = makeWolf({ "cerebrum.md": "- lesson line about kafka\n".repeat(2000) });
+  const out = readWolfFile(wolf, "cerebrum.md");
+  assert.ok(out.length <= 3200, `not bounded: ${out.length}`);
+  assert.match(out, /truncated at 3000 of \d+ chars — use recall/);
+  cleanup();
+});
+
+test("the read size comes from the chat settings", () => {
+  assert.equal(readSettings(fakeCtl(undefined, { maxReadChars: 6000 })).maxReadChars, 6000);
+  assert.equal(readSettings(fakeCtl(undefined, undefined)).maxReadChars, 3000);
 });

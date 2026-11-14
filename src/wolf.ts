@@ -372,8 +372,12 @@ export function remember(wolfDir: string, agentId: string, fact: string): string
 
 const READABLE = new Set(["STATUS.md", "cerebrum.md", "memory.md", "buglog.json", "anatomy.md"]);
 
-/** Read one whitelisted .wolf/ file, bounded so a huge file can't blow the context. */
-export function readWolfFile(wolfDir: string, name: string, maxChars = 8000): string {
+/**
+ * Read one whitelisted .wolf/ file, bounded so a huge file can't blow the context. The default was
+ * 8000 characters; in a live test qwen3.8 with 8k context called it three times for one question,
+ * overflowed its window and answered with file names that exist nowhere in the knowledge base.
+ */
+export function readWolfFile(wolfDir: string, name: string, maxChars = 3000): string {
   if (!READABLE.has(name)) return `Not a readable .wolf file. Allowed: ${[...READABLE].join(", ")}`;
 
   // buglog.json is the one file where a character-count cut is actively harmful: at 220k it gets
@@ -400,7 +404,7 @@ export function readWolfFile(wolfDir: string, name: string, maxChars = 8000): st
 
   const content = readFileSafe(path.join(wolfDir, name));
   if (!content.trim()) return `${name} is empty or missing.`;
-  return content.length > maxChars ? content.slice(0, maxChars) + `\n…(truncated, ${content.length} chars total)` : content;
+  return content.length > maxChars ? content.slice(0, maxChars) + `\n…(truncated at ${maxChars} of ${content.length} chars — use recall to find a specific part instead of reading more)` : content;
 }
 
 export function hasWolf(projectRoot: string): boolean {

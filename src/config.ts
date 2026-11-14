@@ -78,6 +78,17 @@ export const configSchematics = createConfigSchematics()
     },
     1500,
   )
+  .field(
+    "maxReadChars",
+    "numeric",
+    {
+      displayName: "Max size of read_wolf_file (chars)",
+      subtitle: "How much one read_wolf_file call returns. Several full reads overflow a small local model's context and it starts inventing; 3000 suits 8k-context models.",
+      min: 1000,
+      max: 20000,
+    },
+    3000,
+  )
   .build();
 
 export interface Settings {
@@ -88,6 +99,7 @@ export interface Settings {
   openwolfCmd: string;
   injectDigest: boolean;
   maxDigestChars: number;
+  maxReadChars: number;
 }
 
 /** Anything that can hand out both configs — the preprocessor and the tools provider controllers. */
@@ -102,7 +114,7 @@ interface ConfigSource {
  */
 export function readSettings(ctl: unknown): Settings {
   const src = ctl as ConfigSource;
-  const s: Settings = { projectRoot: "", agentId: "qwen", useMcp: false, openwolfCmd: "openwolf", injectDigest: true, maxDigestChars: 1500 };
+  const s: Settings = { projectRoot: "", agentId: "qwen", useMcp: false, openwolfCmd: "openwolf", injectDigest: true, maxDigestChars: 1500, maxReadChars: 3000 };
   let globalRoot = "";
   try {
     const g = src.getGlobalPluginConfig?.(globalConfigSchematics) as unknown as { get(k: string): unknown } | undefined;
@@ -120,6 +132,8 @@ export function readSettings(ctl: unknown): Settings {
     s.injectDigest = Boolean(c.get("injectDigest"));
     const n = Number(c.get("maxDigestChars"));
     if (Number.isFinite(n) && n > 0) s.maxDigestChars = n;
+    const r = Number(c.get("maxReadChars"));
+    if (Number.isFinite(r) && r > 0) s.maxReadChars = r;
   } catch { /* defaults */ }
   s.projectRoot = chatRoot.trim() || globalRoot.trim();
   return s;
