@@ -15,7 +15,8 @@ remember it.
   1500 chars) so it stays cheap on a small local model.
 - **Gives the model tools** (tools provider):
   - `recall(query)` — keyword search across `.wolf/` (cerebrum, memory, STATUS, buglog)
-  - `read_wolf_file(name)` — read STATUS/cerebrum/memory/buglog/anatomy in full (bounded)
+  - `read_wolf_file(name)` — read the beginning of STATUS/cerebrum/memory/buglog/anatomy (default
+    3000 characters; for anything further in, the model is pointed to `recall`)
   - `remember(fact)` — save a durable fact to `.wolf/memory.md`
 
 ## Two modes
@@ -117,6 +118,7 @@ Per chat:
 | Project root for this chat | empty = global value | Use a different project in this one chat |
 | Auto-inject resume digest | on | Prepend the digest to the first message |
 | Max digest size (chars) | 1500 | Keep small for small local models; quest, Do-Not-Repeat and bugs share it |
+| Max size of read_wolf_file (chars) | 3000 | How much one `read_wolf_file` call returns. Several larger reads overflowed an 8k-context model in testing, and it began naming files that do not exist |
 
 > **Upgrading from 0.2.0:** project root, model id and the MCP settings moved from the per-chat
 > settings to the global ones. Set them once in the plugin settings; old per-chat values are not
